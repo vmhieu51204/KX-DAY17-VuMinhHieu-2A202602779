@@ -1,44 +1,33 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
-
+﻿from __future__ import annotations
+from dataclasses import dataclass, field
+from importlib import import_module
 
 @dataclass
 class ProviderConfig:
-    """Student TODO: define the provider configuration shared by the agents.
-
-    Required providers for this lab:
-    - openai
-    - custom (OpenAI-compatible base URL)
-    - gemini
-    - anthropic
-    - ollama
-    - openrouter
-    """
-
-    provider: str
-    model_name: str
-    temperature: float
-    api_key: str | None = None
+    provider: str = 'openai'
+    model_name: str = 'gpt-4o-mini'
+    temperature: float = 0.0
+    api_key: str | None = field(default=None, repr=False)
     base_url: str | None = None
 
-
 def normalize_provider(value: str) -> str:
-    """Student TODO: map aliases like `anthorpic` -> `anthropic`."""
-
-    raise NotImplementedError
-
+    value = value.strip().lower()
+    value = {'anthorpic': 'anthropic', 'google': 'gemini', 'openai-compatible': 'custom'}.get(value, value)
+    if value not in {'openai', 'custom', 'gemini', 'anthropic', 'ollama', 'openrouter'}:
+        raise ValueError(f'Unsupported provider: {value}')
+    return value
 
 def build_chat_model(config: ProviderConfig):
-    """Student TODO: instantiate the real chat model for the selected provider.
-
-    Pseudocode:
-    - `openai` -> `ChatOpenAI`
-    - `custom` -> `ChatOpenAI` with `base_url`
-    - `gemini` -> `ChatGoogleGenerativeAI`
-    - `anthropic` -> `ChatAnthropic`
-    - `ollama` -> `ChatOllama`
-    - `openrouter` -> `ChatOpenRouter`
-    """
-
-    raise NotImplementedError
+    """Lazy imports allow offline operation without any provider SDK."""
+    provider = normalize_provider(config.provider)
+    classes = {'openai': ('langchain_openai', 'ChatOpenAI'), 'custom': ('langchain_openai', 'ChatOpenAI'), 'openrouter': ('langchain_openai', 'ChatOpenAI'), 'gemini': ('langchain_google_genai', 'ChatGoogleGenerativeAI'), 'anthropic': ('langchain_anthropic', 'ChatAnthropic'), 'ollama': ('langchain_ollama', 'ChatOllama')}
+    module, name = classes[provider]
+    kwargs = {'model': config.model_name, 'temperature': config.temperature}
+    if config.api_key:
+        kwargs['google_api_key' if provider == 'gemini' else 'api_key'] = config.api_key
+    if provider == 'custom' and not config.base_url:
+        raise ValueError('CUSTOM_BASE_URL is required')
+    url = config.base_url or ('https://openrouter.ai/api/v1' if provider == 'openrouter' else None)
+    if url:
+        kwargs['base_url'] = url
+    return getattr(import_module(module), name)(**kwargs)

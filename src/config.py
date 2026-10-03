@@ -1,21 +1,11 @@
-from __future__ import annotations
-
+﻿from __future__ import annotations
+import os
 from dataclasses import dataclass
 from pathlib import Path
-
-from model_provider import ProviderConfig
-
+from model_provider import ProviderConfig, normalize_provider
 
 @dataclass
 class LabConfig:
-    """Student TODO: define the shared configuration for the lab.
-
-    Hints:
-    - Keep paths for the repo root, dataset directory, and state directory.
-    - Add compact-memory settings such as threshold and number of messages to keep.
-    - Add provider settings for `openai`, `custom`, `gemini`, `anthropic`, `ollama`, and `openrouter`.
-    """
-
     base_dir: Path
     data_dir: Path
     state_dir: Path
@@ -23,30 +13,28 @@ class LabConfig:
     compact_keep_messages: int
     model: ProviderConfig
     judge_model: ProviderConfig
+    live_mode: bool = False
 
+    def __post_init__(self):
+        if self.compact_threshold_tokens < 1 or self.compact_keep_messages < 1:
+            raise ValueError('Compaction settings must be positive')
 
 def load_config(base_dir: Path | None = None) -> LabConfig:
-    """Student TODO: load environment variables and return a LabConfig.
-
-    Pseudocode:
-    1. Resolve the repo root or default to the current file parent.
-    2. Optionally load values from `.env`.
-    3. Create `state/` if it does not exist.
-    4. Return a populated LabConfig instance.
-    """
-
     root = (base_dir or Path(__file__).resolve().parent.parent).resolve()
-
-    # TODO: read env vars for one of the supported providers.
-    # Example knobs:
-    # - LLM_PROVIDER / LLM_MODEL
-    # - OPENAI_API_KEY
-    # - GEMINI_API_KEY
-    # - ANTHROPIC_API_KEY
-    # - OLLAMA_BASE_URL
-    # - OPENROUTER_API_KEY
-    # - CUSTOM_BASE_URL / CUSTOM_API_KEY
-    # TODO: create `root / "state"`.
-    # TODO: choose sensible defaults for compact memory.
-
-    raise NotImplementedError("Students should implement load_config().")
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        pass
+    else:
+        load_dotenv(root / '.env', override=False)
+    def provider_config(prefix, fallback=None):
+        provider = normalize_provider(os.getenv(f'{prefix}_PROVIDER', fallback.provider if fallback else 'openai'))
+        defaults = {'openai': 'gpt-4o-mini', 'custom': 'local-model', 'gemini': 'gemini-2.0-flash', 'anthropic': 'claude-sonnet-4-20250514', 'ollama': 'llama3.2', 'openrouter': 'openai/gpt-4o-mini'}
+        key = os.getenv(f'{prefix}_API_KEY') or os.getenv(f'{provider.upper()}_API_KEY')
+        if provider == 'gemini':
+            key = key or os.getenv('GOOGLE_API_KEY')
+        return ProviderConfig(provider, os.getenv(f'{prefix}_MODEL', fallback.model_name if fallback and fallback.provider == provider else defaults[provider]), float(os.getenv(f'{prefix}_TEMPERATURE', '0')), key, os.getenv(f'{prefix}_BASE_URL') or os.getenv(f'{provider.upper()}_BASE_URL'))
+    state = root / 'state'
+    state.mkdir(parents=True, exist_ok=True)
+    model = provider_config('LLM')
+    return LabConfig(root, root / 'data', state, int(os.getenv('COMPACT_THRESHOLD_TOKENS', '1200')), int(os.getenv('COMPACT_KEEP_MESSAGES', '4')), model, provider_config('JUDGE', model), os.getenv('LAB_LIVE_MODE', '0').lower() in {'1', 'true', 'yes'})
